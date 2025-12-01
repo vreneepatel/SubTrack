@@ -334,13 +334,16 @@ class InvoicePDF(FPDF):  # type: ignore
 
 
 def _invoice_meta(order: Order) -> dict:
-    now = datetime.now()
-    issued = now.strftime("%m-%d-%Y")
-    # keep due for potential internal use, but we won't print it
-    due = (now + timedelta(days=INVOICE_DUE_DAYS)).strftime("%m-%d-%Y")
+    delivery_dt = fmt_mmddyyyy(order.event_date)
+
     code = school_code(order.school_name)
-    inv_num = f"{code}-{issued}"
-    return {"number": inv_num, "issued": issued, "due": due}
+    inv_num = f"{code}-{delivery_dt}"
+
+    return {
+        "number": inv_num,
+        "issued": delivery_dt,  
+        "due": ""             
+    }
 
 
 def export_pdf(order: Order, filepath: Optional[str] = None) -> Optional[str]:
