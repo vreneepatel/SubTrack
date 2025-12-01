@@ -27,6 +27,10 @@ st.set_page_config(
     layout="centered",
 )
 
+# simple version marker so you can see it's updated
+st.caption("SubTrack v2.1 – navbar + DB (PDF = saves invoice)")
+
+# make sure DB exists
 init_db()
 
 if "order" not in st.session_state:
@@ -56,6 +60,7 @@ def render_header(title: str):
 def page_create_invoice():
     render_header("School Catering Order")
 
+    # Store + school + delivery date
     with st.container():
         store_choice = st.selectbox(
             "Select store",
@@ -86,6 +91,7 @@ def page_create_invoice():
 
     st.divider()
 
+    # Sandwiches
     st.subheader("Sandwiches")
 
     qtys = {}
@@ -111,6 +117,7 @@ def page_create_invoice():
 
     st.divider()
 
+    # Optional sides/drinks
     include_sides = st.checkbox("Include sides/drinks?", key="include_sides")
     if include_sides:
         with st.form("sides_form", clear_on_submit=True):
@@ -139,6 +146,7 @@ def page_create_invoice():
 
     st.divider()
 
+    # Calculate order
     with st.form("calc_form"):
         submitted = st.form_submit_button("Calculate Total")
         if submitted:
@@ -151,22 +159,25 @@ def page_create_invoice():
             if st.session_state.sides:
                 items.extend(st.session_state.sides)
 
-            st.session_state.order = Order(
-                store_key=store_key,
-                school_name=school_name,
-                event_date=str(delivery_date),
-                items=items,
-            )
+            if not items:
+                st.warning("Enter at least one sandwich or side.")
+            else:
+                st.session_state.order = Order(
+                    store_key=store_key,
+                    school_name=school_name,
+                    event_date=str(delivery_date),
+                    items=items,
+                )
 
+    # Show totals + export options
     if st.session_state.order:
         order = st.session_state.order
-        st.success(
-            f"Subtotal: ${order.subtotal:.2f}   |   Total: ${order.total:.2f}"
-        )
+        st.success(f"Subtotal: ${order.subtotal:.2f}   |   Total: ${order.total:.2f}")
 
         col1, col2 = st.columns(2)
         with col1:
-            if st.button("Download PDF Invoice"):
+            # Generating the PDF also records the invoice in the database
+            if st.button("Generate + Download PDF Invoice"):
                 pdf_path = export_pdf(order)
                 if pdf_path:
                     with open(pdf_path, "rb") as f:
@@ -176,6 +187,7 @@ def page_create_invoice():
                             file_name=pathlib.Path(pdf_path).name,
                             mime="application/pdf",
                         )
+                    st.info("Invoice has been saved to the database.")
         with col2:
             if st.button("Export CSV"):
                 csv_path = export_csv(order)
@@ -189,7 +201,7 @@ def page_view_invoices():
 
     rows = fetch_invoices(limit=500)
     if not rows:
-        st.info("No invoices recorded yet.")
+        st.info("No invoices recorded yet. Generate a PDF invoice first.")
         return
 
     df = pd.DataFrame(
@@ -238,14 +250,15 @@ def page_price_list():
     st.table(df)
 
 
-# ---------- PAGE 4: ADMIN SETTINGS (placeholder) ----------
+# ---------- PAGE 4: ADMIN SETTINGS ----------
 
 def page_admin_settings():
     render_header("Admin Settings")
-    st.info("Admin settings coming later. For now, everything is hard-coded in subtrack_core.py.")
+    st.info("Admin settings are currently configured in subtrack_core.py.")
     st.write("- Update prices in `MENU_ITEMS`")
     st.write("- Update schools, contacts, and times in `SCHOOLS`")
     st.write("- Stores are in `STORES`")
+    st.write("- Database file: `subtrack.db` in the app folder")
 
 
 # ---------- PAGE ROUTER ----------
