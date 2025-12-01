@@ -1,4 +1,4 @@
-# subtrack_app.py – Streamlit UI for school catering with navbar + DB
+# subtrack_app.py – Streamlit UI for school catering with navbar + CSV log
 
 import os
 import pathlib
@@ -19,6 +19,7 @@ from subtrack_core import (
     init_db,
     fetch_invoices,
     fetch_monthly_totals,
+    export_order_form,
 )
 
 st.set_page_config(
@@ -28,9 +29,9 @@ st.set_page_config(
 )
 
 # simple version marker so you can see it's updated
-st.caption("SubTrack v2.1 – navbar + DB (PDF = saves invoice)")
+st.caption("SubTrack v2.2 – navbar + invoices.csv log + order form")
 
-# make sure DB exists
+# make sure invoices.csv exists
 init_db()
 
 if "order" not in st.session_state:
@@ -176,18 +177,31 @@ def page_create_invoice():
 
         col1, col2 = st.columns(2)
         with col1:
-            # Generating the PDF also records the invoice in the database
-            if st.button("Generate + Download PDF Invoice"):
-                pdf_path = export_pdf(order)
-                if pdf_path:
-                    with open(pdf_path, "rb") as f:
+            # Generate both PDFs: invoice (with prices) and order form (no prices)
+            if st.button("Generate PDFs (Invoice + Order Form)"):
+                invoice_path = export_pdf(order)
+                order_form_path = export_order_form(order)
+
+                if invoice_path:
+                    with open(invoice_path, "rb") as f:
                         st.download_button(
-                            label="Click to download",
+                            label="Download Invoice",
                             data=f.read(),
-                            file_name=pathlib.Path(pdf_path).name,
+                            file_name=pathlib.Path(invoice_path).name,
                             mime="application/pdf",
+                            key="download_invoice",
                         )
-                    st.info("Invoice has been saved to the database.")
+                    st.info("Invoice logged to invoices.csv.")
+                if order_form_path:
+                    with open(order_form_path, "rb") as f:
+                        st.download_button(
+                            label="Download Order Form",
+                            data=f.read(),
+                            file_name=pathlib.Path(order_form_path).name,
+                            mime="application/pdf",
+                            key="download_order_form",
+                        )
+
         with col2:
             if st.button("Export CSV"):
                 csv_path = export_csv(order)
@@ -258,7 +272,7 @@ def page_admin_settings():
     st.write("- Update prices in `MENU_ITEMS`")
     st.write("- Update schools, contacts, and times in `SCHOOLS`")
     st.write("- Stores are in `STORES`")
-    st.write("- Database file: `subtrack.db` in the app folder")
+    st.write("- Invoice log file: `invoices.csv` in the app folder")
 
 
 # ---------- PAGE ROUTER ----------
