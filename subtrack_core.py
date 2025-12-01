@@ -565,12 +565,12 @@ def export_pdf(order: Order, filepath: Optional[str] = None) -> Optional[str]:
         pdf.cell(
             360,
             14,
-            pdf_safe(f"School Phone: {sch_phone}   Delivery Time: {sch_time}"),
+            pdf_safe(f"Phone: {sch_phone}   Delivery Time: {sch_time}"),
             ln=1,
         )
         pdf.set_x(left_x)
         sch_email = school.get("contact_email", "")
-        pdf.cell(360, 14, pdf_safe(f"School Email: {sch_email}"), ln=1)
+        pdf.cell(360, 14, pdf_safe(f"Email: {sch_email}"), ln=1)
 
     pdf.set_x(left_x)
     pdf.cell(360, 14, f"Delivery Date: {fmt_mmddyyyy(order.event_date)}", ln=1)
