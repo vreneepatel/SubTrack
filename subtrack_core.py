@@ -637,8 +637,7 @@ def export_pdf(order: Order, filepath: Optional[str] = None) -> Optional[str]:
         TABLE_WIDTH,
         12,
         pdf_safe(
-            "Contact: Shephali or Digna Patel  |  Phone: "
-            f"{store['phone']}  |  Email: {store['email']}"
+            "Contact: Shephali or Digna Patel  |  Phone: (904) 866-9497 orn(904) 887-7130"
         ),
     )
 
@@ -679,7 +678,7 @@ def export_pdf(order: Order, filepath: Optional[str] = None) -> Optional[str]:
         TABLE_WIDTH,
         12,
         pdf_safe(
-            "Thank you for your business. Please contact us through email if you have any "
+            "Thank you for your business. Please contact us if you have any "
             "questions regarding this invoice."
         ),
     )
