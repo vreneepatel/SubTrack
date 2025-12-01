@@ -516,7 +516,7 @@ def export_pdf(order: Order, filepath: Optional[str] = None) -> Optional[str]:
     pdf.set_font("Helvetica", "", 10)
     pdf.set_text_color(80)
     pdf.set_x(text_x)
-    pdf.cell(right_x - left_x - 12, 14, pdf_safe(f"Phone: {store['phone']}"), ln=1)
+    pdf.cell(right_x - left_x - 12, 14, pdf_safe("Phone: (904) 866-9497 or (904) 887-7130"), ln=1)
     pdf.set_x(text_x)
     pdf.cell(right_x - left_x - 12, 14, pdf_safe(f"Email: {store['email']}"), ln=1)
     pdf.set_text_color(0)
@@ -534,9 +534,15 @@ def export_pdf(order: Order, filepath: Optional[str] = None) -> Optional[str]:
     pdf.set_x(right_x)
     pdf.cell(RIGHT_W / 2, RIGHT_ROW_H, "Invoice #", border=1)
     pdf.cell(RIGHT_W / 2, RIGHT_ROW_H, pdf_safe(meta["number"]), align="R", border=1, ln=1)
+
     pdf.set_x(right_x)
-    pdf.cell(RIGHT_W / 2, RIGHT_ROW_H, "Date", border=1)
+    pdf.cell(RIGHT_W / 2, RIGHT_ROW_H, "Delivery Date", border=1)
     pdf.cell(RIGHT_W / 2, RIGHT_ROW_H, meta["issued"], align="R", border=1, ln=1)
+    
+    delivery_time = school.get("delivery_time", "")
+    pdf.set_x(right_x)
+    pdf.cell(RIGHT_W / 2, RIGHT_ROW_H, "Delivery Time", border=1)
+    pdf.cell(RIGHT_W / 2, RIGHT_ROW_H, pdf_safe(delivery_time), align="R", border=1, ln=1)
 
     header_bottom = max(text_y + 16 * 3, box_y + RIGHT_LABEL_H + 2 * RIGHT_ROW_H) + 10
     pdf.set_xy(left_x, header_bottom)
@@ -627,19 +633,6 @@ def export_pdf(order: Order, filepath: Optional[str] = None) -> Optional[str]:
 
     total_row("Subtotal", order.subtotal)
     total_row("Total", order.total, bold=True, fill=True)
-
-    # footer
-    pdf.ln(18)
-    pdf.set_font("Helvetica", "", 9)
-    pdf.set_text_color(90)
-    pdf.set_x(left_x)
-    pdf.multi_cell(
-        TABLE_WIDTH,
-        12,
-        pdf_safe(
-            "Contact: Shephali or Digna Patel  |  Phone: (904) 866-9497 orn(904) 887-7130"
-        ),
-    )
 
     pdf.ln(16)
     pdf.set_text_color(0)
