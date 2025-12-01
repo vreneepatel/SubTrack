@@ -28,8 +28,7 @@ st.set_page_config(
     layout="centered",
 )
 
-# simple version marker so you can see it's updated
-st.caption("SubTrack v2.2 – navbar + invoices.csv log + order form")
+st.caption("SubTrack v2.3 – navbar + invoices.csv log + invoice + order form")
 
 # make sure invoices.csv exists
 init_db()
@@ -38,6 +37,10 @@ if "order" not in st.session_state:
     st.session_state.order = None
 if "sides" not in st.session_state:
     st.session_state.sides = []
+if "invoice_pdf_path" not in st.session_state:
+    st.session_state.invoice_pdf_path = None
+if "order_form_pdf_path" not in st.session_state:
+    st.session_state.order_form_pdf_path = None
 
 # ---------- NAVBAR ----------
 st.sidebar.title("SubTrack")
@@ -169,6 +172,9 @@ def page_create_invoice():
                     event_date=str(delivery_date),
                     items=items,
                 )
+                # clear any old PDF paths when a new order is created
+                st.session_state.invoice_pdf_path = None
+                st.session_state.order_form_pdf_path = None
 
     # Show totals + export options
     if st.session_state.order:
@@ -177,35 +183,46 @@ def page_create_invoice():
 
         col1, col2 = st.columns(2)
         with col1:
-            # Generate both PDFs: invoice (with prices) and order form (no prices)
+            # Generate both PDFs once and store paths in session_state
             if st.button("Generate PDFs (Invoice + Order Form)"):
                 invoice_path = export_pdf(order)
                 order_form_path = export_order_form(order)
-
-                if invoice_path:
-                    with open(invoice_path, "rb") as f:
-                        st.download_button(
-                            label="Download Invoice",
-                            data=f.read(),
-                            file_name=pathlib.Path(invoice_path).name,
-                            mime="application/pdf",
-                            key="download_invoice",
-                        )
-                    st.info("Invoice logged to invoices.csv.")
-                if order_form_path:
-                    with open(order_form_path, "rb") as f:
-                        st.download_button(
-                            label="Download Order Form",
-                            data=f.read(),
-                            file_name=pathlib.Path(order_form_path).name,
-                            mime="application/pdf",
-                            key="download_order_form",
-                        )
+                st.session_state.invoice_pdf_path = invoice_path
+                st.session_state.order_form_pdf_path = order_form_path
+                st.success("PDFs generated. Use the buttons below to download.")
 
         with col2:
             if st.button("Export CSV"):
                 csv_path = export_csv(order)
                 st.success(f"CSV saved: {csv_path}")
+
+        # Always show download buttons if we have paths
+        if st.session_state.invoice_pdf_path or st.session_state.order_form_pdf_path:
+            st.markdown("### Downloads")
+
+        if st.session_state.invoice_pdf_path:
+            inv_path = st.session_state.invoice_pdf_path
+            if os.path.exists(inv_path):
+                with open(inv_path, "rb") as f:
+                    st.download_button(
+                        label="Download Invoice",
+                        data=f.read(),
+                        file_name=pathlib.Path(inv_path).name,
+                        mime="application/pdf",
+                        key="download_invoice",
+                    )
+
+        if st.session_state.order_form_pdf_path:
+            of_path = st.session_state.order_form_pdf_path
+            if os.path.exists(of_path):
+                with open(of_path, "rb") as f:
+                    st.download_button(
+                        label="Download Order Form",
+                        data=f.read(),
+                        file_name=pathlib.Path(of_path).name,
+                        mime="application/pdf",
+                        key="download_order_form",
+                    )
 
 
 # ---------- PAGE 2: VIEW PAST INVOICES ----------
