@@ -1,7 +1,8 @@
-# subtrack_core.py – shared models, menu, schools, CSV + PDF export
+# subtrack_core.py – shared models, menu, schools, CSV + PDF export + DB
 
 import os
 import csv
+import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional
@@ -12,8 +13,9 @@ except ImportError:
     FPDF = None
 
 LOGO_PATH = "Subway Logo.png"
-DELIVERY_RATE = 0.0      # no delivery fee for schools
+DELIVERY_RATE = 0.10  # not used for schools anymore, but kept for future
 INVOICE_DUE_DAYS = 14
+DB_PATH = "subtrack.db"
 
 # ------------ MENU ------------
 
@@ -216,7 +218,7 @@ class Order:
     school_name: str       # key into SCHOOLS
     event_date: str        # "YYYY-MM-DD" or "MM-DD-YYYY"
     items: List[LineItem]
-    include_delivery: bool = True  # kept for compatibility; no fee is charged
+    include_delivery: bool = False   # no delivery fee for schools
 
     @property
     def subtotal(self) -> float:
@@ -224,13 +226,11 @@ class Order:
 
     @property
     def delivery(self) -> float:
-        # no delivery fee for schools
-        return 0.0
+        return 0.0  
 
     @property
     def total(self) -> float:
-        # total is just subtotal (delivery is always zero)
-        return round(self.subtotal, 2)
+        return self.subtotal
 
 # ------------ HELPERS ------------
 
@@ -266,6 +266,100 @@ def school_code(name: str) -> str:
     if info and "code" in info:
         return info["code"]
     return "GEN000"
+
+# ------------ DATABASE HELPERS ------------
+
+def get_connection() -> sqlite3.Connection:
+    return sqlite3.connect(DB_PATH)
+
+
+def init_db() -> None:
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS invoices (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at TEXT NOT NULL,
+            store_key TEXT,
+            store_name TEXT,
+            school_name TEXT,
+            delivery_date TEXT,
+            subtotal REAL,
+            total REAL,
+            invoice_number TEXT
+        )
+        """
+    )
+    conn.commit()
+    conn.close()
+
+
+def record_invoice(order: Order, invoice_number: str) -> None:
+    conn = get_connection()
+    cur = conn.cursor()
+    created_at = datetime.now().isoformat(timespec="seconds")
+    store = STORES[order.store_key]
+    cur.execute(
+        """
+        INSERT INTO invoices (
+            created_at, store_key, store_name, school_name,
+            delivery_date, subtotal, total, invoice_number
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            created_at,
+            order.store_key,
+            store["name"],
+            order.school_name,
+            fmt_mmddyyyy(order.event_date),
+            order.subtotal,
+            order.total,
+            invoice_number,
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+
+def fetch_invoices(limit: int = 200):
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT id, created_at, school_name, store_name,
+               delivery_date, subtotal, total, invoice_number
+        FROM invoices
+        ORDER BY created_at DESC
+        LIMIT ?
+        """,
+        (limit,),
+    )
+    rows = cur.fetchall()
+    conn.close()
+    return rows
+
+
+def fetch_monthly_totals():
+    """
+    Group totals by year-month (based on created_at).
+    Returns list of (YYYY-MM, total).
+    """
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT substr(created_at, 1, 7) AS year_month,
+               SUM(total) AS total_amount
+        FROM invoices
+        GROUP BY year_month
+        ORDER BY year_month DESC
+        """
+    )
+    rows = cur.fetchall()
+    conn.close()
+    return rows
 
 # ------------ CSV EXPORT ------------
 
@@ -328,28 +422,24 @@ def export_csv(order: Order, filepath: Optional[str] = None) -> str:
 
 # ------------ PDF EXPORT ------------
 
-class InvoicePDF(FPDF):  # type: ignore
+class InvoicePDF(FPDF):  
     def header(self):
         pass
 
 
 def _invoice_meta(order: Order) -> dict:
-    delivery_dt = fmt_mmddyyyy(order.event_date)
-
+    delivery_str = fmt_mmddyyyy(order.event_date)
     code = school_code(order.school_name)
-    inv_num = f"{code}-{delivery_dt}"
-
-    return {
-        "number": inv_num,
-        "issued": delivery_dt,  
-        "due": ""             
-    }
+    inv_num = f"{code}-{delivery_str}"
+    return {"number": inv_num, "issued": delivery_str}
 
 
 def export_pdf(order: Order, filepath: Optional[str] = None) -> Optional[str]:
     if FPDF is None:
         print("fpdf2 not installed. Skipping PDF export.")
         return None
+
+    init_db()  
 
     out_dir = os.path.join(os.getcwd(), "invoices")
     os.makedirs(out_dir, exist_ok=True)
@@ -368,12 +458,11 @@ def export_pdf(order: Order, filepath: Optional[str] = None) -> Optional[str]:
     LOGO_H = 52
     ROW_H = 20
 
-    # widened sandwich column so text doesn't bleed into price
-    COL_DATE = 80
-    COL_DESC = 240
-    COL_PRICE = 60
-    COL_QTY = 50
-    COL_TOTAL = 70
+    COL_DATE = 90
+    COL_DESC = 220  
+    COL_PRICE = 70
+    COL_QTY = 60
+    COL_TOTAL = 90
     TABLE_WIDTH = COL_DATE + COL_DESC + COL_PRICE + COL_QTY + COL_TOTAL
 
     RIGHT_W = 220
@@ -394,7 +483,6 @@ def export_pdf(order: Order, filepath: Optional[str] = None) -> Optional[str]:
     right_x = page_w - PAGE_MARGIN - RIGHT_W
     y0 = PAGE_MARGIN
 
-    # logo + store info
     if os.path.exists(LOGO_PATH):
         try:
             pdf.image(LOGO_PATH, x=left_x, y=y0, h=LOGO_H)
@@ -414,7 +502,6 @@ def export_pdf(order: Order, filepath: Optional[str] = None) -> Optional[str]:
     pdf.cell(right_x - left_x - 12, 14, pdf_safe(f"Email: {store['email']}"), ln=1)
     pdf.set_text_color(0)
 
-    # invoice box
     box_y = y0
     pdf.set_xy(right_x, box_y)
     pdf.set_fill_color(GREY, GREY, GREY)
@@ -430,7 +517,6 @@ def export_pdf(order: Order, filepath: Optional[str] = None) -> Optional[str]:
     pdf.set_x(right_x)
     pdf.cell(RIGHT_W / 2, RIGHT_ROW_H, "Date", border=1)
     pdf.cell(RIGHT_W / 2, RIGHT_ROW_H, meta["issued"], align="R", border=1, ln=1)
-    # no "Due" printed anymore
 
     header_bottom = max(text_y + 16 * 3, box_y + RIGHT_LABEL_H + 2 * RIGHT_ROW_H) + 10
     pdf.set_xy(left_x, header_bottom)
@@ -438,7 +524,6 @@ def export_pdf(order: Order, filepath: Optional[str] = None) -> Optional[str]:
     pdf.cell(page_w - 2 * PAGE_MARGIN, 0, "", border="B")
     pdf.ln(16)
 
-    # school block
     pdf.set_font("Helvetica", "B", 10)
     pdf.set_x(left_x)
     pdf.cell(120, 14, "SCHOOL:", ln=1)
@@ -471,7 +556,6 @@ def export_pdf(order: Order, filepath: Optional[str] = None) -> Optional[str]:
 
     pdf.ln(12)
 
-    # table header
     pdf.set_font("Helvetica", "B", 10)
     pdf.set_fill_color(LIGHT, LIGHT, LIGHT)
     pdf.set_x(left_x)
@@ -482,7 +566,6 @@ def export_pdf(order: Order, filepath: Optional[str] = None) -> Optional[str]:
     pdf.cell(COL_TOTAL, ROW_H, "TOTAL", border=1, align="R", fill=True)
     pdf.ln(ROW_H)
 
-    # table rows
     pdf.set_font("Helvetica", "", 10)
     delivery_date_str = fmt_mmddyyyy(order.event_date)
     for it in order.items:
@@ -501,7 +584,6 @@ def export_pdf(order: Order, filepath: Optional[str] = None) -> Optional[str]:
 
     pdf.ln(10)
 
-    # totals (no delivery row)
     def total_row(label: str, value: float, bold: bool = False, fill: bool = False):
         pdf.set_x(left_x + COL_DATE + COL_DESC)
         if bold:
@@ -522,7 +604,6 @@ def export_pdf(order: Order, filepath: Optional[str] = None) -> Optional[str]:
     total_row("Subtotal", order.subtotal)
     total_row("Total", order.total, bold=True, fill=True)
 
-    # footer
     pdf.ln(18)
     pdf.set_font("Helvetica", "", 9)
     pdf.set_text_color(90)
@@ -540,14 +621,14 @@ def export_pdf(order: Order, filepath: Optional[str] = None) -> Optional[str]:
     pdf.set_text_color(0)
     pdf.set_font("Helvetica", "B", 10)
     pdf.set_x(left_x)
-    pdf.cell(160, 16, "Temperature at the store:", border=0)
+    pdf.cell(150, 16, "Temperature at the store:", border=0)
     pdf.set_font("Helvetica", "", 10)
     pdf.cell(200, 16, "__________________", border=0, ln=1)
 
     pdf.ln(4)
     pdf.set_x(left_x)
     pdf.set_font("Helvetica", "B", 10)
-    pdf.cell(160, 16, "Temperature at delivery:", border=0)
+    pdf.cell(150, 16, "Temperature at delivery:", border=0)
     pdf.set_font("Helvetica", "", 10)
     pdf.cell(200, 16, "__________________", border=0, ln=1)
 
@@ -573,11 +654,14 @@ def export_pdf(order: Order, filepath: Optional[str] = None) -> Optional[str]:
         TABLE_WIDTH,
         12,
         pdf_safe(
-            "Thank you for your business. Please contact us through our email if you have any "
+            "Thank you for your business. Please contact us through email if you have any "
             "questions regarding this invoice."
         ),
     )
     pdf.set_text_color(0)
 
     pdf.output(filepath)
+
+    record_invoice(order, meta["number"])
+
     return os.path.abspath(filepath)
