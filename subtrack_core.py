@@ -1,4 +1,4 @@
-# subtrack_core.py – shared models, menu, schools, CSV + PDF export + CSV invoice log
+# subtrack_core.py – shared models, menu, schools, CSV + PDF export + CSV "DB"
 
 import os
 import csv
@@ -11,10 +11,14 @@ try:
 except ImportError:
     FPDF = None
 
+# paths
 LOGO_PATH = "Subway Logo.png"
-DELIVERY_RATE = 0.10  # kept for future, but not used for schools now
-INVOICE_DUE_DAYS = 14  # kept for future if you ever want terms again
-INVOICE_LOG_CSV = "invoices_log.csv"  # replaces the SQLite DB
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+INVOICE_LOG_PATH = os.path.join(BASE_DIR, "invoices.csv")
+
+DELIVERY_RATE = 0.10  # not used for schools now, kept for future
+INVOICE_DUE_DAYS = 14  # not used, but harmless
+
 
 # ------------ MENU ------------
 
@@ -93,6 +97,7 @@ UNIT_PRICES: Dict[str, float] = {
     code: float(MENU_ITEMS[code]["price"]) for code in SANDWICH_MENU
 }
 
+
 # ------------ STORES ------------
 
 STORES: Dict[str, Dict[str, str]] = {
@@ -111,6 +116,7 @@ STORES: Dict[str, Dict[str, str]] = {
         "is_subway": "True",
     },
 }
+
 
 # ------------ SCHOOLS ------------
 
@@ -198,6 +204,7 @@ SCHOOLS: Dict[str, Dict[str, str]] = {
     },
 }
 
+
 # ------------ DATA MODELS ------------
 
 @dataclass
@@ -230,6 +237,7 @@ class Order:
     @property
     def total(self) -> float:
         return self.subtotal
+
 
 # ------------ HELPERS ------------
 
@@ -266,19 +274,16 @@ def school_code(name: str) -> str:
         return info["code"]
     return "GEN000"
 
-# ------------ "DB" HELPERS (CSV-BASED) ------------
+
+# ------------ CSV "DB" HELPERS ------------
 
 def init_db() -> None:
     """
-    Kept for compatibility with subtrack_app.
-    For CSV mode, we don't need to do anything here.
+    For backward compatibility with the old DB name.
+    Now this just makes sure invoices.csv exists with the right header.
     """
-    return
-
-
-def _ensure_invoice_log_with_header() -> None:
-    if not os.path.exists(INVOICE_LOG_CSV):
-        with open(INVOICE_LOG_CSV, "w", newline="") as f:
+    if not os.path.exists(INVOICE_LOG_PATH):
+        with open(INVOICE_LOG_PATH, "w", newline="") as f:
             writer = csv.writer(f)
             writer.writerow(
                 [
@@ -290,80 +295,56 @@ def _ensure_invoice_log_with_header() -> None:
                     "subtotal",
                     "total",
                     "invoice_number",
-                    "pdf_path",
                 ]
             )
 
 
-def record_invoice(order: Order, invoice_number: str, pdf_path: str) -> None:
-    """
-    Append one invoice record to invoices_log.csv.
-    """
-    _ensure_invoice_log_with_header()
+def record_invoice(order: Order, invoice_number: str) -> None:
+    init_db()
     store = STORES[order.store_key]
     created_at = datetime.now().isoformat(timespec="seconds")
-    delivery_date_fmt = fmt_mmddyyyy(order.event_date)
-
-    with open(INVOICE_LOG_CSV, "a", newline="") as f:
+    row = [
+        created_at,
+        order.store_key,
+        store["name"],
+        order.school_name,
+        fmt_mmddyyyy(order.event_date),
+        order.subtotal,
+        order.total,
+        invoice_number,
+    ]
+    with open(INVOICE_LOG_PATH, "a", newline="") as f:
         writer = csv.writer(f)
-        writer.writerow(
-            [
-                created_at,
-                order.store_key,
-                store["name"],
-                order.school_name,
-                delivery_date_fmt,
-                f"{order.subtotal:.2f}",
-                f"{order.total:.2f}",
-                invoice_number,
-                pdf_path,
-            ]
-        )
+        writer.writerow(row)
 
 
 def fetch_invoices(limit: int = 200):
     """
-    Read invoices from invoices_log.csv.
-    Returns a list of tuples:
-    (ID, created_at, school_name, store_name, delivery_date, subtotal, total, invoice_number)
+    Read from invoices.csv and return rows shaped like:
+    (id, created_at, school_name, store_name, delivery_date, subtotal, total, invoice_number)
     """
-    if not os.path.exists(INVOICE_LOG_CSV):
+    if not os.path.exists(INVOICE_LOG_PATH):
         return []
 
-    rows = []
-    with open(INVOICE_LOG_CSV, "r", newline="") as f:
+    with open(INVOICE_LOG_PATH, "r", newline="") as f:
         reader = csv.DictReader(f)
-        for row in reader:
-            rows.append(row)
+        rows = list(reader)
 
-    # newest first, based on created_at string
-    rows.sort(key=lambda r: r.get("created_at", ""), reverse=True)
+    # sort newest first by created_at
+    rows.sort(key=lambda r: r["created_at"], reverse=True)
 
     result = []
     for idx, r in enumerate(rows[:limit], start=1):
-        created_at = r.get("created_at", "")
-        school_name = r.get("school_name", "")
-        store_name = r.get("store_name", "")
-        delivery_date = r.get("delivery_date", "")
-        try:
-            subtotal = float(r.get("subtotal", "0") or 0)
-        except ValueError:
-            subtotal = 0.0
-        try:
-            total = float(r.get("total", "0") or 0)
-        except ValueError:
-            total = 0.0
-        invoice_number = r.get("invoice_number", "")
         result.append(
             (
                 idx,
-                created_at,
-                school_name,
-                store_name,
-                delivery_date,
-                subtotal,
-                total,
-                invoice_number,
+                r["created_at"],
+                r["school_name"],
+                r["store_name"],
+                r["delivery_date"],
+                float(r["subtotal"]),
+                float(r["total"]),
+                r["invoice_number"],
             )
         )
     return result
@@ -371,33 +352,35 @@ def fetch_invoices(limit: int = 200):
 
 def fetch_monthly_totals():
     """
-    Group totals by year-month (based on created_at) from invoices_log.csv.
+    Group totals by YYYY-MM based on created_at.
     Returns list of (YYYY-MM, total).
     """
-    if not os.path.exists(INVOICE_LOG_CSV):
+    if not os.path.exists(INVOICE_LOG_PATH):
         return []
 
-    totals: Dict[str, float] = {}
-    with open(INVOICE_LOG_CSV, "r", newline="") as f:
+    with open(INVOICE_LOG_PATH, "r", newline="") as f:
         reader = csv.DictReader(f)
-        for row in reader:
-            created_at = row.get("created_at", "")
-            if not created_at or len(created_at) < 7:
-                continue
-            year_month = created_at[:7]  # "YYYY-MM"
-            try:
-                amount = float(row.get("total", "0") or 0)
-            except ValueError:
-                amount = 0.0
-            totals[year_month] = totals.get(year_month, 0.0) + amount
+        rows = list(reader)
+
+    totals: Dict[str, float] = {}
+    for r in rows:
+        created = r["created_at"]
+        if not created:
+            continue
+        ym = created[:7]  # YYYY-MM
+        totals[ym] = totals.get(ym, 0.0) + float(r["total"])
 
     # sort newest first
     out = sorted(totals.items(), key=lambda x: x[0], reverse=True)
     return out
 
-# ------------ CSV EXPORT (PER ORDER DETAIL) ------------
+
+# ------------ PER-ORDER CSV EXPORT ------------
 
 def export_csv(order: Order, filepath: Optional[str] = None) -> str:
+    """
+    Export a detailed CSV for this single order (separate from invoices.csv log).
+    """
     if not filepath:
         safe_school = "".join(
             c for c in order.school_name if c.isalnum() or c in (" ", "-", "_")
@@ -454,6 +437,7 @@ def export_csv(order: Order, filepath: Optional[str] = None) -> str:
 
     return filepath
 
+
 # ------------ PDF EXPORT ------------
 
 class InvoicePDF(FPDF):  # type: ignore
@@ -473,7 +457,7 @@ def export_pdf(order: Order, filepath: Optional[str] = None) -> Optional[str]:
         print("fpdf2 not installed. Skipping PDF export.")
         return None
 
-    # no DB init anymore; CSV log will be created on demand
+    init_db()  # make sure invoices.csv exists
 
     out_dir = os.path.join(os.getcwd(), "invoices")
     os.makedirs(out_dir, exist_ok=True)
@@ -517,6 +501,7 @@ def export_pdf(order: Order, filepath: Optional[str] = None) -> Optional[str]:
     right_x = page_w - PAGE_MARGIN - RIGHT_W
     y0 = PAGE_MARGIN
 
+    # logo + store info
     if os.path.exists(LOGO_PATH):
         try:
             pdf.image(LOGO_PATH, x=left_x, y=y0, h=LOGO_H)
@@ -536,6 +521,7 @@ def export_pdf(order: Order, filepath: Optional[str] = None) -> Optional[str]:
     pdf.cell(right_x - left_x - 12, 14, pdf_safe(f"Email: {store['email']}"), ln=1)
     pdf.set_text_color(0)
 
+    # invoice box
     box_y = y0
     pdf.set_xy(right_x, box_y)
     pdf.set_fill_color(GREY, GREY, GREY)
@@ -547,14 +533,7 @@ def export_pdf(order: Order, filepath: Optional[str] = None) -> Optional[str]:
     pdf.set_font("Helvetica", "", 10)
     pdf.set_x(right_x)
     pdf.cell(RIGHT_W / 2, RIGHT_ROW_H, "Invoice #", border=1)
-    pdf.cell(
-        RIGHT_W / 2,
-        RIGHT_ROW_H,
-        pdf_safe(meta["number"]),
-        align="R",
-        border=1,
-        ln=1,
-    )
+    pdf.cell(RIGHT_W / 2, RIGHT_ROW_H, pdf_safe(meta["number"]), align="R", border=1, ln=1)
     pdf.set_x(right_x)
     pdf.cell(RIGHT_W / 2, RIGHT_ROW_H, "Date", border=1)
     pdf.cell(RIGHT_W / 2, RIGHT_ROW_H, meta["issued"], align="R", border=1, ln=1)
@@ -565,6 +544,7 @@ def export_pdf(order: Order, filepath: Optional[str] = None) -> Optional[str]:
     pdf.cell(page_w - 2 * PAGE_MARGIN, 0, "", border="B")
     pdf.ln(16)
 
+    # school block
     pdf.set_font("Helvetica", "B", 10)
     pdf.set_x(left_x)
     pdf.cell(120, 14, "SCHOOL:", ln=1)
@@ -597,6 +577,7 @@ def export_pdf(order: Order, filepath: Optional[str] = None) -> Optional[str]:
 
     pdf.ln(12)
 
+    # table header
     pdf.set_font("Helvetica", "B", 10)
     pdf.set_fill_color(LIGHT, LIGHT, LIGHT)
     pdf.set_x(left_x)
@@ -607,6 +588,7 @@ def export_pdf(order: Order, filepath: Optional[str] = None) -> Optional[str]:
     pdf.cell(COL_TOTAL, ROW_H, "TOTAL", border=1, align="R", fill=True)
     pdf.ln(ROW_H)
 
+    # table rows
     pdf.set_font("Helvetica", "", 10)
     delivery_date_str = fmt_mmddyyyy(order.event_date)
     for it in order.items:
@@ -625,6 +607,7 @@ def export_pdf(order: Order, filepath: Optional[str] = None) -> Optional[str]:
 
     pdf.ln(10)
 
+    # totals
     def total_row(label: str, value: float, bold: bool = False, fill: bool = False):
         pdf.set_x(left_x + COL_DATE + COL_DESC)
         if bold:
@@ -645,6 +628,7 @@ def export_pdf(order: Order, filepath: Optional[str] = None) -> Optional[str]:
     total_row("Subtotal", order.subtotal)
     total_row("Total", order.total, bold=True, fill=True)
 
+    # footer
     pdf.ln(18)
     pdf.set_font("Helvetica", "", 9)
     pdf.set_text_color(90)
@@ -703,6 +687,7 @@ def export_pdf(order: Order, filepath: Optional[str] = None) -> Optional[str]:
 
     pdf.output(filepath)
 
-    record_invoice(order, meta["number"], filepath)
+    # log invoice to invoices.csv
+    record_invoice(order, meta["number"])
 
     return os.path.abspath(filepath)
