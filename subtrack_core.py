@@ -511,6 +511,7 @@ def export_pdf(order: Order, filepath: Optional[str] = None) -> Optional[str]:
     y0 = PAGE_MARGIN
 
     # logo + store info
+        # logo + store info
     if os.path.exists(LOGO_PATH):
         try:
             pdf.image(LOGO_PATH, x=left_x, y=y0, h=LOGO_H)
@@ -522,8 +523,18 @@ def export_pdf(order: Order, filepath: Optional[str] = None) -> Optional[str]:
     pdf.set_xy(text_x, text_y)
     pdf.set_font("Helvetica", "B", 13)
     pdf.cell(right_x - left_x - 12, 16, pdf_safe(store["name"]), ln=1)
+
     pdf.set_font("Helvetica", "", 10)
     pdf.set_text_color(80)
+
+    pdf.set_x(text_x)
+    pdf.cell(
+        right_x - left_x - 12,
+        14,
+        pdf_safe("Shephali Patel and Digna Patel"),
+        ln=1,
+    )
+
     pdf.set_x(text_x)
     pdf.cell(
         right_x - left_x - 12,
