@@ -275,12 +275,21 @@ def school_code(name: str) -> str:
     return "GEN000"
 
 
+def extract_time(time_str: str) -> str:
+    """
+    Converts 'Monday @ 10:30am' → '10:30am'
+    or 'Tuesday @ 9:00-9:30am' → '9:00-9:30am'
+    """
+    if "@" in time_str:
+        return time_str.split("@", 1)[1].strip()
+    return time_str.strip()
+
+
 # ------------ CSV "DB" HELPERS ------------
 
 def init_db() -> None:
     """
-    For backward compatibility with the old DB name.
-    Now this just makes sure invoices.csv exists with the right header.
+    Ensure invoices.csv exists with header.
     """
     if not os.path.exists(INVOICE_LOG_PATH):
         with open(INVOICE_LOG_PATH, "w", newline="") as f:
@@ -516,12 +525,22 @@ def export_pdf(order: Order, filepath: Optional[str] = None) -> Optional[str]:
     pdf.set_font("Helvetica", "", 10)
     pdf.set_text_color(80)
     pdf.set_x(text_x)
-    pdf.cell(right_x - left_x - 12, 14, pdf_safe("Phone: (904) 866-9497 or (904) 887-7130"), ln=1)
+    pdf.cell(
+        right_x - left_x - 12,
+        14,
+        pdf_safe("Phone: (904) 866-9497 or (904) 887-7130"),
+        ln=1,
+    )
     pdf.set_x(text_x)
-    pdf.cell(right_x - left_x - 12, 14, pdf_safe(f"Email: {store['email']}"), ln=1)
+    pdf.cell(
+        right_x - left_x - 12,
+        14,
+        pdf_safe(f"Email: {store['email']}"),
+        ln=1,
+    )
     pdf.set_text_color(0)
 
-    # invoice box
+    # invoice box (top right)
     box_y = y0
     pdf.set_xy(right_x, box_y)
     pdf.set_fill_color(GREY, GREY, GREY)
@@ -531,20 +550,28 @@ def export_pdf(order: Order, filepath: Optional[str] = None) -> Optional[str]:
 
     pdf.set_text_color(0)
     pdf.set_font("Helvetica", "", 10)
+
+    # Invoice #
     pdf.set_x(right_x)
     pdf.cell(RIGHT_W / 2, RIGHT_ROW_H, "Invoice #", border=1)
     pdf.cell(RIGHT_W / 2, RIGHT_ROW_H, pdf_safe(meta["number"]), align="R", border=1, ln=1)
 
+    # Delivery Date (from order.event_date)
     pdf.set_x(right_x)
     pdf.cell(RIGHT_W / 2, RIGHT_ROW_H, "Delivery Date", border=1)
     pdf.cell(RIGHT_W / 2, RIGHT_ROW_H, meta["issued"], align="R", border=1, ln=1)
-    
-    delivery_time = school.get("delivery_time", "")
+
+    # Delivery Time (time only)
+    delivery_time_raw = school.get("delivery_time", "") if school else ""
+    delivery_time = extract_time(delivery_time_raw)
     pdf.set_x(right_x)
     pdf.cell(RIGHT_W / 2, RIGHT_ROW_H, "Delivery Time", border=1)
     pdf.cell(RIGHT_W / 2, RIGHT_ROW_H, pdf_safe(delivery_time), align="R", border=1, ln=1)
 
-    header_bottom = max(text_y + 16 * 3, box_y + RIGHT_LABEL_H + 2 * RIGHT_ROW_H) + 10
+    header_bottom = max(
+        text_y + 16 * 3,
+        box_y + RIGHT_LABEL_H + 3 * RIGHT_ROW_H,
+    ) + 10
     pdf.set_xy(left_x, header_bottom)
     pdf.set_draw_color(BORDER, BORDER, BORDER)
     pdf.cell(page_w - 2 * PAGE_MARGIN, 0, "", border="B")
@@ -561,25 +588,34 @@ def export_pdf(order: Order, filepath: Optional[str] = None) -> Optional[str]:
     if school:
         pdf.set_x(left_x)
         pdf.cell(360, 14, pdf_safe(school.get("address", "")), ln=1)
-        pdf.set_x(left_x)
+
+        # Manager
         mgr = school.get("manager", "")
         if mgr:
+            pdf.set_x(left_x)
             pdf.cell(360, 14, pdf_safe(f"Manager: {mgr}"), ln=1)
-        pdf.set_x(left_x)
-        sch_phone = school.get("phone", "")
-        sch_time = school.get("delivery_time", "")
-        pdf.cell(
-            360,
-            14,
-            pdf_safe(f"Phone: {sch_phone}   Delivery Time: {sch_time}"),
-            ln=1,
-        )
-        pdf.set_x(left_x)
-        sch_email = school.get("contact_email", "")
-        pdf.cell(360, 14, pdf_safe(f"Email: {sch_email}"), ln=1)
 
-    pdf.set_x(left_x)
-    pdf.cell(360, 14, f"Delivery Date: {fmt_mmddyyyy(order.event_date)}", ln=1)
+        # Phone (no delivery time here now)
+        sch_phone = school.get("phone", "")
+        if sch_phone:
+            pdf.set_x(left_x)
+            pdf.cell(
+                360,
+                14,
+                pdf_safe(f"Phone: {sch_phone}"),
+                ln=1,
+            )
+
+        # School email
+        sch_email = school.get("contact_email", "")
+        if sch_email:
+            pdf.set_x(left_x)
+            pdf.cell(
+                360,
+                14,
+                pdf_safe(f"Email: {sch_email}"),
+                ln=1,
+            )
 
     pdf.ln(12)
 
