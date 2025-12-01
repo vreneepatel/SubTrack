@@ -890,18 +890,6 @@ def export_order_form(order: Order, filepath: Optional[str] = None) -> Optional[
         pdf.cell(COL_QTY, ROW_H, f"{it.qty}", border=1, align="R")
         pdf.ln(ROW_H)
 
-    pdf.ln(16)
-    pdf.set_font("Helvetica", "", 9)
-    pdf.set_text_color(90)
-    pdf.set_x(left_x)
-    pdf.multi_cell(
-        TABLE_WIDTH,
-        12,
-        pdf_safe(
-            "Internal order form – no prices shown. Use this copy for preparation and packing."
-        ),
-    )
-    pdf.set_text_color(0)
 
     pdf.output(filepath)
     return os.path.abspath(filepath)
