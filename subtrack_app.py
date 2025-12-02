@@ -30,7 +30,7 @@ st.set_page_config(
     layout="centered",
 )
 
-st.caption("SubTrack v2.3 – navbar + invoices.csv log + invoice + order form")
+st.caption("SubTrack v2.2 – navbar + CSV log")
 
 # make sure invoices.csv exists
 init_db()
@@ -39,10 +39,10 @@ if "order" not in st.session_state:
     st.session_state.order = None
 if "sides" not in st.session_state:
     st.session_state.sides = []
-if "invoice_pdf_path" not in st.session_state:
-    st.session_state.invoice_pdf_path = None
-if "order_form_pdf_path" not in st.session_state:
-    st.session_state.order_form_pdf_path = None
+if "invoice_path" not in st.session_state:
+    st.session_state.invoice_path = None
+if "order_form_path" not in st.session_state:
+    st.session_state.order_form_path = None
 
 # ---------- NAVBAR ----------
 st.sidebar.title("SubTrack")
@@ -143,7 +143,8 @@ def page_create_invoice():
             st.write("Current sides/drinks:")
             for i, s in enumerate(st.session_state.sides, start=1):
                 st.write(
-                    f"{i}. {s.qty} × {s.name} @ ${s.unit_price:.2f} = ${s.qty * s.unit_price:.2f}"
+                    f"{i}. {s.qty} × {s.name} @ ${s.unit_price:.2f} = "
+                    f"${s.qty * s.unit_price:.2f}"
                 )
             if st.button("Clear sides/drinks"):
                 st.session_state.sides = []
@@ -174,57 +175,56 @@ def page_create_invoice():
                     event_date=str(delivery_date),
                     items=items,
                 )
-                # clear any old PDF paths when a new order is created
-                st.session_state.invoice_pdf_path = None
-                st.session_state.order_form_pdf_path = None
+                # reset generated paths when you recalc a new order
+                st.session_state.invoice_path = None
+                st.session_state.order_form_path = None
 
     # Show totals + export options
     if st.session_state.order:
         order = st.session_state.order
         st.success(f"Subtotal: ${order.subtotal:.2f}   |   Total: ${order.total:.2f}")
 
-        col1, col2 = st.columns(2)
+        col1, col2, col3 = st.columns(3)
+
+        # Invoice PDF (logs to invoices.csv)
         with col1:
-            # Generate both PDFs once and store paths in session_state
-            if st.button("Generate PDFs (Invoice + Order Form)"):
-                invoice_path = export_pdf(order)
-                order_form_path = export_order_form(order)
-                st.session_state.invoice_pdf_path = invoice_path
-                st.session_state.order_form_pdf_path = order_form_path
-                st.success("PDFs generated. Use the buttons below to download.")
-
-        with col2:
-            if st.button("Export CSV"):
-                csv_path = export_csv(order)
-                st.success(f"CSV saved: {csv_path}")
-
-        # Always show download buttons if we have paths
-        if st.session_state.invoice_pdf_path or st.session_state.order_form_pdf_path:
-            st.markdown("### Downloads")
-
-        if st.session_state.invoice_pdf_path:
-            inv_path = st.session_state.invoice_pdf_path
-            if os.path.exists(inv_path):
-                with open(inv_path, "rb") as f:
+            if st.button("Generate Invoice PDF", key="btn_invoice_pdf"):
+                pdf_path = export_pdf(order)
+                if pdf_path:
+                    st.session_state.invoice_path = pdf_path
+                    st.success("Invoice generated and saved to invoices.csv.")
+            if st.session_state.invoice_path:
+                with open(st.session_state.invoice_path, "rb") as f:
                     st.download_button(
                         label="Download Invoice",
                         data=f.read(),
-                        file_name=pathlib.Path(inv_path).name,
+                        file_name=pathlib.Path(st.session_state.invoice_path).name,
                         mime="application/pdf",
-                        key="download_invoice",
+                        key="dl_invoice_pdf",
                     )
 
-        if st.session_state.order_form_pdf_path:
-            of_path = st.session_state.order_form_pdf_path
-            if os.path.exists(of_path):
-                with open(of_path, "rb") as f:
+        # Order form PDF (no prices)
+        with col2:
+            if st.button("Generate Order Form PDF", key="btn_order_form_pdf"):
+                of_path = export_order_form(order)
+                if of_path:
+                    st.session_state.order_form_path = of_path
+                    st.success("Order form generated.")
+            if st.session_state.order_form_path:
+                with open(st.session_state.order_form_path, "rb") as f:
                     st.download_button(
                         label="Download Order Form",
                         data=f.read(),
-                        file_name=pathlib.Path(of_path).name,
+                        file_name=pathlib.Path(st.session_state.order_form_path).name,
                         mime="application/pdf",
-                        key="download_order_form",
+                        key="dl_order_form_pdf",
                     )
+
+        # CSV export (detailed order)
+        with col3:
+            if st.button("Export Order CSV"):
+                csv_path = export_csv(order)
+                st.success(f"CSV saved: {csv_path}")
 
 
 # ---------- PAGE 2: VIEW PAST INVOICES ----------
@@ -289,7 +289,7 @@ def page_admin_settings():
     render_header("Admin Settings")
 
     st.info(
-        "Prices, schools, and stores are still configured in subtrack_core.py. "
+        "Prices, schools, and stores are configured in subtrack_core.py. "
         "Here you can also manage saved invoices."
     )
 
@@ -304,7 +304,7 @@ def page_admin_settings():
 
     rows = fetch_invoices(limit=500)
     if not rows:
-        st.info("No invoices recorded yet. Generate a PDF invoice first.")
+        st.info("No invoices recorded yet.")
         return
 
     df = pd.DataFrame(
