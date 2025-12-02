@@ -19,7 +19,6 @@ INVOICE_LOG_PATH = os.path.join(BASE_DIR, "invoices.csv")
 DELIVERY_RATE = 0.10  # not used for schools now, kept for future
 INVOICE_DUE_DAYS = 14  # not used, but harmless
 
-
 # ------------ MENU ------------
 
 SANDWICH_MENU: List[str] = [
@@ -97,7 +96,6 @@ UNIT_PRICES: Dict[str, float] = {
     code: float(MENU_ITEMS[code]["price"]) for code in SANDWICH_MENU
 }
 
-
 # ------------ STORES ------------
 
 STORES: Dict[str, Dict[str, str]] = {
@@ -116,7 +114,6 @@ STORES: Dict[str, Dict[str, str]] = {
         "is_subway": "True",
     },
 }
-
 
 # ------------ SCHOOLS ------------
 
@@ -204,7 +201,6 @@ SCHOOLS: Dict[str, Dict[str, str]] = {
     },
 }
 
-
 # ------------ DATA MODELS ------------
 
 @dataclass
@@ -237,7 +233,6 @@ class Order:
     @property
     def total(self) -> float:
         return self.subtotal
-
 
 # ------------ HELPERS ------------
 
@@ -275,80 +270,20 @@ def school_code(name: str) -> str:
     return "GEN000"
 
 
-def delivery_time_only(raw: str) -> str:
+def delivery_time_only(school: Dict[str, str]) -> str:
     """
-    Strip weekday and '@' if present.
-    E.g. 'Monday @ 10:30am' -> '10:30am'
+    Take 'Monday @ 10:30am' -> '10:30am'
     """
-    if not raw:
-        return ""
+    raw = school.get("delivery_time", "")
     if "@" in raw:
         return raw.split("@", 1)[1].strip()
     return raw.strip()
-
-def delete_invoice(invoice_number: str) -> bool:
-    """
-    Delete a single invoice from invoices.csv by its invoice_number.
-    Returns True if something was deleted, False otherwise.
-    """
-    if not os.path.exists(INVOICE_LOG_PATH):
-        return False
-
-    with open(INVOICE_LOG_PATH, "r", newline="") as f:
-        reader = csv.DictReader(f)
-        rows = list(reader)
-
-    original_len = len(rows)
-    kept = [r for r in rows if r.get("invoice_number") != invoice_number]
-
-    if len(kept) == original_len:
-        # nothing removed
-        return False
-
-    # Rewrite file with same header and remaining rows
-    with open(INVOICE_LOG_PATH, "w", newline="") as f:
-        fieldnames = [
-            "created_at",
-            "store_key",
-            "store_name",
-            "school_name",
-            "delivery_date",
-            "subtotal",
-            "total",
-            "invoice_number",
-        ]
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        for r in kept:
-            writer.writerow(r)
-
-    return True
-
-
-def delete_all_invoices() -> None:
-    """
-    Wipe all invoice records (for clearing test data).
-    Keeps the header row.
-    """
-    with open(INVOICE_LOG_PATH, "w", newline="") as f:
-        fieldnames = [
-            "created_at",
-            "store_key",
-            "store_name",
-            "school_name",
-            "delivery_date",
-            "subtotal",
-            "total",
-            "invoice_number",
-        ]
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
 
 # ------------ CSV "DB" HELPERS ------------
 
 def init_db() -> None:
     """
-    Ensure invoices.csv exists with the correct header.
+    Make sure invoices.csv exists with the right header.
     """
     if not os.path.exists(INVOICE_LOG_PATH):
         with open(INVOICE_LOG_PATH, "w", newline="") as f:
@@ -441,6 +376,62 @@ def fetch_monthly_totals():
     return out
 
 
+def delete_invoice(invoice_number: str) -> bool:
+    """
+    Delete a single invoice from invoices.csv by its invoice_number.
+    Returns True if something was deleted, False otherwise.
+    """
+    if not os.path.exists(INVOICE_LOG_PATH):
+        return False
+
+    with open(INVOICE_LOG_PATH, "r", newline="") as f:
+        reader = csv.DictReader(f)
+        rows = list(reader)
+
+    original_len = len(rows)
+    kept = [r for r in rows if r.get("invoice_number") != invoice_number]
+
+    if len(kept) == original_len:
+        return False
+
+    with open(INVOICE_LOG_PATH, "w", newline="") as f:
+        fieldnames = [
+            "created_at",
+            "store_key",
+            "store_name",
+            "school_name",
+            "delivery_date",
+            "subtotal",
+            "total",
+            "invoice_number",
+        ]
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for r in kept:
+            writer.writerow(r)
+
+    return True
+
+
+def delete_all_invoices() -> None:
+    """
+    Wipe all invoice records (for clearing test data).
+    Keeps the header row.
+    """
+    with open(INVOICE_LOG_PATH, "w", newline="") as f:
+        fieldnames = [
+            "created_at",
+            "store_key",
+            "store_name",
+            "school_name",
+            "delivery_date",
+            "subtotal",
+            "total",
+            "invoice_number",
+        ]
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+
 # ------------ PER-ORDER CSV EXPORT ------------
 
 def export_csv(order: Order, filepath: Optional[str] = None) -> str:
@@ -503,8 +494,7 @@ def export_csv(order: Order, filepath: Optional[str] = None) -> str:
 
     return filepath
 
-
-# ------------ PDF EXPORT: INVOICE ------------
+# ------------ PDF EXPORT ------------
 
 class InvoicePDF(FPDF):  # type: ignore
     def header(self):
@@ -518,12 +508,53 @@ def _invoice_meta(order: Order) -> dict:
     return {"number": inv_num, "issued": delivery_str}
 
 
+def _common_header(pdf: InvoicePDF, store: Dict[str, str], school: Dict[str, str], order: Order):
+    PAGE_MARGIN = 56
+    LOGO_H = 52
+
+    page_w = pdf.w
+    left_x = PAGE_MARGIN
+    right_w = 220
+    right_x = page_w - PAGE_MARGIN - right_w
+    y0 = PAGE_MARGIN
+
+    # logo + store info
+    if os.path.exists(LOGO_PATH):
+        try:
+            pdf.image(LOGO_PATH, x=left_x, y=y0, h=LOGO_H)
+        except Exception:
+            pass
+
+    text_x = left_x
+    text_y = y0 + LOGO_H + 8
+    pdf.set_xy(text_x, text_y)
+    pdf.set_font("Helvetica", "B", 13)
+    pdf.cell(right_x - left_x - 12, 16, pdf_safe(store["name"]), ln=1)
+    pdf.set_font("Helvetica", "", 10)
+    pdf.set_text_color(80)
+    pdf.set_x(text_x)
+    # Owners under logo
+    pdf.cell(right_x - left_x - 12, 14, pdf_safe("Shephali Patel and Digna Patel"), ln=1)
+    pdf.set_x(text_x)
+    pdf.cell(
+        right_x - left_x - 12,
+        14,
+        pdf_safe("Phone: (904) 866-9497 or (904) 887-7130"),
+        ln=1,
+    )
+    pdf.set_x(text_x)
+    pdf.cell(right_x - left_x - 12, 14, pdf_safe(f"Email: {store['email']}"), ln=1)
+    pdf.set_text_color(0)
+
+    return left_x, right_x, right_w, y0, text_y
+
+
 def export_pdf(order: Order, filepath: Optional[str] = None) -> Optional[str]:
     if FPDF is None:
         print("fpdf2 not installed. Skipping PDF export.")
         return None
 
-    init_db()
+    init_db()  # make sure invoices.csv exists
 
     out_dir = os.path.join(os.getcwd(), "invoices")
     os.makedirs(out_dir, exist_ok=True)
@@ -539,7 +570,6 @@ def export_pdf(order: Order, filepath: Optional[str] = None) -> Optional[str]:
     meta = _invoice_meta(order)
 
     PAGE_MARGIN = 56
-    LOGO_H = 52
     ROW_H = 20
 
     COL_DATE = 90
@@ -563,48 +593,9 @@ def export_pdf(order: Order, filepath: Optional[str] = None) -> Optional[str]:
     pdf.set_draw_color(BORDER, BORDER, BORDER)
 
     page_w = pdf.w
-    left_x = PAGE_MARGIN
-    right_x = page_w - PAGE_MARGIN - RIGHT_W
-    y0 = PAGE_MARGIN
+    left_x, right_x, right_w, y0, text_y = _common_header(pdf, store, school, order)
 
-    # logo + store info
-    if os.path.exists(LOGO_PATH):
-        try:
-            pdf.image(LOGO_PATH, x=left_x, y=y0, h=LOGO_H)
-        except Exception:
-            pass
-
-    text_x = left_x
-    text_y = y0 + LOGO_H + 8
-    pdf.set_xy(text_x, text_y)
-    pdf.set_font("Helvetica", "B", 13)
-    pdf.cell(right_x - left_x - 12, 16, pdf_safe(store["name"]), ln=1)
-    pdf.set_font("Helvetica", "", 10)
-    pdf.set_text_color(80)
-    pdf.set_x(text_x)
-    pdf.cell(
-        right_x - left_x - 12,
-        14,
-        pdf_safe("Shephali Patel and Digna Patel"),
-        ln=1,
-    )
-    pdf.set_x(text_x)
-    pdf.cell(
-        right_x - left_x - 12,
-        14,
-        pdf_safe("Phone: (904) 866-9497 or (904) 887-7130"),
-        ln=1,
-    )
-    pdf.set_x(text_x)
-    pdf.cell(
-        right_x - left_x - 12,
-        14,
-        pdf_safe(f"Email: {store['email']}"),
-        ln=1,
-    )
-    pdf.set_text_color(0)
-
-    # invoice box (top-right)
+    # invoice box
     box_y = y0
     pdf.set_xy(right_x, box_y)
     pdf.set_fill_color(GREY, GREY, GREY)
@@ -622,18 +613,18 @@ def export_pdf(order: Order, filepath: Optional[str] = None) -> Optional[str]:
     pdf.cell(RIGHT_W / 2, RIGHT_ROW_H, "Delivery Date", border=1)
     pdf.cell(RIGHT_W / 2, RIGHT_ROW_H, meta["issued"], align="R", border=1, ln=1)
 
-    delivery_time_value = delivery_time_only(school.get("delivery_time", ""))
+    delivery_time_display = delivery_time_only(school) if school else ""
     pdf.set_x(right_x)
     pdf.cell(RIGHT_W / 2, RIGHT_ROW_H, "Delivery Time", border=1)
-    pdf.cell(RIGHT_W / 2, RIGHT_ROW_H, pdf_safe(delivery_time_value), align="R", border=1, ln=1)
+    pdf.cell(RIGHT_W / 2, RIGHT_ROW_H, pdf_safe(delivery_time_display), align="R", border=1, ln=1)
 
-    header_bottom = max(text_y + 16 * 3, box_y + RIGHT_LABEL_H + 2 * RIGHT_ROW_H) + 10
+    header_bottom = max(text_y + 16 * 4, box_y + RIGHT_LABEL_H + 3 * RIGHT_ROW_H) + 10
     pdf.set_xy(left_x, header_bottom)
     pdf.set_draw_color(BORDER, BORDER, BORDER)
     pdf.cell(page_w - 2 * PAGE_MARGIN, 0, "", border="B")
     pdf.ln(16)
 
-    # school block (no extra delivery time/date)
+    # school block
     pdf.set_font("Helvetica", "B", 10)
     pdf.set_x(left_x)
     pdf.cell(120, 14, "SCHOOL:", ln=1)
@@ -708,7 +699,6 @@ def export_pdf(order: Order, filepath: Optional[str] = None) -> Optional[str]:
     total_row("Subtotal", order.subtotal)
     total_row("Total", order.total, bold=True, fill=True)
 
-    # footer: temps + signatures + note
     pdf.ln(16)
     pdf.set_text_color(0)
     pdf.set_font("Helvetica", "B", 10)
@@ -760,15 +750,13 @@ def export_pdf(order: Order, filepath: Optional[str] = None) -> Optional[str]:
     return os.path.abspath(filepath)
 
 
-# ------------ PDF EXPORT: ORDER FORM ------------
-
 def export_order_form(order: Order, filepath: Optional[str] = None) -> Optional[str]:
     """
-    Generate an ORDER FORM PDF: same layout as invoice but
-    without prices or money totals. Still includes temps/signatures.
+    Generate an ORDER FORM version: same layout as invoice,
+    but without any prices or totals.
     """
     if FPDF is None:
-        print("fpdf2 not installed. Skipping order form PDF export.")
+        print("fpdf2 not installed. Skipping order form export.")
         return None
 
     out_dir = os.path.join(os.getcwd(), "invoices")
@@ -782,18 +770,15 @@ def export_order_form(order: Order, filepath: Optional[str] = None) -> Optional[
 
     store = STORES[order.store_key]
     school = SCHOOLS.get(order.school_name, {})
-    meta = _invoice_meta(order)
+    meta = _invoice_meta(order)  # use same number/date format
 
     PAGE_MARGIN = 56
-    LOGO_H = 52
     ROW_H = 20
 
     COL_DATE = 90
-    COL_DESC = 220
-    COL_PRICE = 70
+    COL_DESC = 260  # use more space since no price/total
     COL_QTY = 60
-    COL_TOTAL = 90
-    TABLE_WIDTH = COL_DATE + COL_DESC + COL_PRICE + COL_QTY + COL_TOTAL
+    TABLE_WIDTH = COL_DATE + COL_DESC + COL_QTY
 
     RIGHT_W = 220
     RIGHT_LABEL_H = 24
@@ -809,48 +794,9 @@ def export_order_form(order: Order, filepath: Optional[str] = None) -> Optional[
     pdf.set_draw_color(BORDER, BORDER, BORDER)
 
     page_w = pdf.w
-    left_x = PAGE_MARGIN
-    right_x = page_w - PAGE_MARGIN - RIGHT_W
-    y0 = PAGE_MARGIN
+    left_x, right_x, right_w, y0, text_y = _common_header(pdf, store, school, order)
 
-    # logo + store info
-    if os.path.exists(LOGO_PATH):
-        try:
-            pdf.image(LOGO_PATH, x=left_x, y=y0, h=LOGO_H)
-        except Exception:
-            pass
-
-    text_x = left_x
-    text_y = y0 + LOGO_H + 8
-    pdf.set_xy(text_x, text_y)
-    pdf.set_font("Helvetica", "B", 13)
-    pdf.cell(right_x - left_x - 12, 16, pdf_safe(store["name"]), ln=1)
-    pdf.set_font("Helvetica", "", 10)
-    pdf.set_text_color(80)
-    pdf.set_x(text_x)
-    pdf.cell(
-        right_x - left_x - 12,
-        14,
-        pdf_safe("Shephali Patel and Digna Patel"),
-        ln=1,
-    )
-    pdf.set_x(text_x)
-    pdf.cell(
-        right_x - left_x - 12,
-        14,
-        pdf_safe("Phone: (904) 866-9497 or (904) 887-7130"),
-        ln=1,
-    )
-    pdf.set_x(text_x)
-    pdf.cell(
-        right_x - left_x - 12,
-        14,
-        pdf_safe(f"Email: {store['email']}"),
-        ln=1,
-    )
-    pdf.set_text_color(0)
-
-    # ORDER FORM box (top right)
+    # ORDER FORM box
     box_y = y0
     pdf.set_xy(right_x, box_y)
     pdf.set_fill_color(GREY, GREY, GREY)
@@ -868,18 +814,18 @@ def export_order_form(order: Order, filepath: Optional[str] = None) -> Optional[
     pdf.cell(RIGHT_W / 2, RIGHT_ROW_H, "Delivery Date", border=1)
     pdf.cell(RIGHT_W / 2, RIGHT_ROW_H, meta["issued"], align="R", border=1, ln=1)
 
-    delivery_time_value = delivery_time_only(school.get("delivery_time", ""))
+    delivery_time_display = delivery_time_only(school) if school else ""
     pdf.set_x(right_x)
     pdf.cell(RIGHT_W / 2, RIGHT_ROW_H, "Delivery Time", border=1)
-    pdf.cell(RIGHT_W / 2, RIGHT_ROW_H, pdf_safe(delivery_time_value), align="R", border=1, ln=1)
+    pdf.cell(RIGHT_W / 2, RIGHT_ROW_H, pdf_safe(delivery_time_display), align="R", border=1, ln=1)
 
-    header_bottom = max(text_y + 16 * 3, box_y + RIGHT_LABEL_H + 2 * RIGHT_ROW_H) + 10
+    header_bottom = max(text_y + 16 * 4, box_y + RIGHT_LABEL_H + 3 * RIGHT_ROW_H) + 10
     pdf.set_xy(left_x, header_bottom)
     pdf.set_draw_color(BORDER, BORDER, BORDER)
     pdf.cell(page_w - 2 * PAGE_MARGIN, 0, "", border="B")
     pdf.ln(16)
 
-    # school block (no extra delivery time/date)
+    # school block
     pdf.set_font("Helvetica", "B", 10)
     pdf.set_x(left_x)
     pdf.cell(120, 14, "SCHOOL:", ln=1)
@@ -903,18 +849,16 @@ def export_order_form(order: Order, filepath: Optional[str] = None) -> Optional[
 
     pdf.ln(12)
 
-    # table header (no price/total values, but keep columns so layout matches)
+    # table header – no prices/totals
     pdf.set_font("Helvetica", "B", 10)
     pdf.set_fill_color(LIGHT, LIGHT, LIGHT)
     pdf.set_x(left_x)
     pdf.cell(COL_DATE, ROW_H, "DELIVERY DATE", border=1, fill=True)
     pdf.cell(COL_DESC, ROW_H, "# OF SANDWICHES", border=1, fill=True)
-    pdf.cell(COL_PRICE, ROW_H, "", border=1, fill=True)
     pdf.cell(COL_QTY, ROW_H, "QTY", border=1, align="R", fill=True)
-    pdf.cell(COL_TOTAL, ROW_H, "", border=1, fill=True)
     pdf.ln(ROW_H)
 
-    # table rows (no money values)
+    # rows (no price data)
     pdf.set_font("Helvetica", "", 10)
     delivery_date_str = fmt_mmddyyyy(order.event_date)
     for it in order.items:
@@ -926,14 +870,10 @@ def export_order_form(order: Order, filepath: Optional[str] = None) -> Optional[
         pdf.set_x(left_x)
         pdf.cell(COL_DATE, ROW_H, delivery_date_str, border=1)
         pdf.cell(COL_DESC, ROW_H, pdf_safe(desc), border=1)
-        pdf.cell(COL_PRICE, ROW_H, "", border=1, align="R")
         pdf.cell(COL_QTY, ROW_H, f"{it.qty}", border=1, align="R")
-        pdf.cell(COL_TOTAL, ROW_H, "", border=1, align="R")
         pdf.ln(ROW_H)
 
     pdf.ln(16)
-
-    # footer: temps + signatures + note
     pdf.set_text_color(0)
     pdf.set_font("Helvetica", "B", 10)
     pdf.set_x(left_x)
