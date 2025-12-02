@@ -20,6 +20,8 @@ from subtrack_core import (
     fetch_invoices,
     fetch_monthly_totals,
     export_order_form,
+    delete_invoice,
+    delete_all_invoices,
 )
 
 st.set_page_config(
@@ -285,11 +287,74 @@ def page_price_list():
 
 def page_admin_settings():
     render_header("Admin Settings")
-    st.info("Admin settings are currently configured in subtrack_core.py.")
-    st.write("- Update prices in `MENU_ITEMS`")
+
+    st.info(
+        "Prices, schools, and stores are still configured in subtrack_core.py. "
+        "Here you can also manage saved invoices."
+    )
+
+    st.markdown("### Configuration locations")
+    st.write("- Update prices in `MENU_ITEMS` in `subtrack_core.py`")
     st.write("- Update schools, contacts, and times in `SCHOOLS`")
     st.write("- Stores are in `STORES`")
     st.write("- Invoice log file: `invoices.csv` in the app folder")
+
+    st.markdown("---")
+    st.markdown("### Delete a single invoice")
+
+    rows = fetch_invoices(limit=500)
+    if not rows:
+        st.info("No invoices recorded yet. Generate a PDF invoice first.")
+        return
+
+    df = pd.DataFrame(
+        rows,
+        columns=[
+            "ID",
+            "Created At",
+            "School",
+            "Store",
+            "Delivery Date",
+            "Subtotal",
+            "Total",
+            "Invoice #",
+        ],
+    )
+
+    st.dataframe(df, use_container_width=True, hide_index=True)
+
+    invoice_numbers = df["Invoice #"].tolist()
+    choice = st.selectbox(
+        "Select an invoice to delete",
+        options=["-- Select --"] + invoice_numbers,
+    )
+
+    if choice != "-- Select --":
+        row = df[df["Invoice #"] == choice].iloc[0]
+        st.write(
+            f"**Selected invoice:** {choice}  \n"
+            f"**School:** {row['School']}  \n"
+            f"**Created At:** {row['Created At']}  \n"
+            f"**Delivery Date:** {row['Delivery Date']}  \n"
+            f"**Total:** ${row['Total']:.2f}"
+        )
+
+        if st.button("Delete this invoice", type="primary"):
+            ok = delete_invoice(choice)
+            if ok:
+                st.success(f"Invoice {choice} deleted.")
+                st.rerun()
+            else:
+                st.error("Could not find that invoice. It may already have been deleted.")
+
+    st.markdown("---")
+    st.markdown("### Danger zone – clear all invoices")
+
+    if st.button("Delete ALL invoices (test data)", type="secondary"):
+        if st.checkbox("I understand this will remove all saved invoices."):
+            delete_all_invoices()
+            st.success("All invoices deleted from invoices.csv.")
+            st.rerun()
 
 
 # ---------- PAGE ROUTER ----------
