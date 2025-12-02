@@ -286,6 +286,63 @@ def delivery_time_only(raw: str) -> str:
         return raw.split("@", 1)[1].strip()
     return raw.strip()
 
+def delete_invoice(invoice_number: str) -> bool:
+    """
+    Delete a single invoice from invoices.csv by its invoice_number.
+    Returns True if something was deleted, False otherwise.
+    """
+    if not os.path.exists(INVOICE_LOG_PATH):
+        return False
+
+    with open(INVOICE_LOG_PATH, "r", newline="") as f:
+        reader = csv.DictReader(f)
+        rows = list(reader)
+
+    original_len = len(rows)
+    kept = [r for r in rows if r.get("invoice_number") != invoice_number]
+
+    if len(kept) == original_len:
+        # nothing removed
+        return False
+
+    # Rewrite file with same header and remaining rows
+    with open(INVOICE_LOG_PATH, "w", newline="") as f:
+        fieldnames = [
+            "created_at",
+            "store_key",
+            "store_name",
+            "school_name",
+            "delivery_date",
+            "subtotal",
+            "total",
+            "invoice_number",
+        ]
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for r in kept:
+            writer.writerow(r)
+
+    return True
+
+
+def delete_all_invoices() -> None:
+    """
+    Wipe all invoice records (for clearing test data).
+    Keeps the header row.
+    """
+    with open(INVOICE_LOG_PATH, "w", newline="") as f:
+        fieldnames = [
+            "created_at",
+            "store_key",
+            "store_name",
+            "school_name",
+            "delivery_date",
+            "subtotal",
+            "total",
+            "invoice_number",
+        ]
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
 
 # ------------ CSV "DB" HELPERS ------------
 
